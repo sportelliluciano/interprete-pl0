@@ -621,6 +621,14 @@
 )
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+; Función auxiliar para agregar un dato a una pila.
+;  - El tipo de la pila luego del push será 'vector'.
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+(defn push [pila dato] 
+  (vec (concat pila [dato]))
+)
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ; LA SIGUIENTE FUNCION DEBERA SER COMPLETADA PARA QUE ANDE EL INTERPRETE DE PL/0 
 ; FALTAN IMPLEMENTAR (todas como llamados recursivos a la funcion interpretar, con recur y argumentos actualizados):
 ;
@@ -649,9 +657,34 @@
 ; RET: Saca una direccion de la pila de llamadas y la coloca en el contador de programa
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
+; (defn spy-state [cod mem cont-prg pila-dat pila-llam]
+;   (do 
+;     (binding [*out* *err*]
+;       (print "MEM: ") (pr mem) (print " | ") 
+;       (print "RET: ") (print (format "%-10s" pila-llam)) (print " | ")
+;       (print "DAT: ") (print (format "%-15s" pila-dat)) (print " | ") 
+;       (print "PC@") (print (format "%02d" cont-prg)) (print ": ") 
+;       (let [fetched (cod cont-prg), 
+;             opcode (if (symbol? fetched) fetched (first fetched)), 
+;             arg (if (symbol? fetched) nil (second fetched))]
+;         (print (format "%-3s " opcode))
+;         (cond
+;           (number? arg) (print (format "%02d" arg))
+;           (nil? arg) nil
+;           :else (let [arg-str (str arg)]
+;             (print (if (< (count arg-str) 15) arg-str (str (subs arg-str 0 15) "...")))
+;           )
+;         )
+;       )
+;       (println "") 
+;     )
+;   )
+; )
+
 (defn interpretar [cod mem cont-prg pila-dat pila-llam]
   (let [fetched (cod cont-prg),
         opcode (if (symbol? fetched) fetched (first fetched))]
+       ; (spy-state cod mem cont-prg pila-dat pila-llam)
        (case opcode
           HLT nil
           IN (let [entr (try (Integer/parseInt (read-line)) (catch Exception e ""))]
@@ -664,6 +697,30 @@
                   (do (print (apply str (butlast (rest (str (second fetched)))))) (flush)
                       (recur cod mem (inc cont-prg) pila-dat pila-llam)))
           NL (do (prn) (recur cod mem (inc cont-prg) pila-dat pila-llam))
+          
+          POP (recur cod (assoc mem (second fetched) (last pila-dat)) (inc cont-prg) (pop pila-dat) pila-llam)
+          PFI (recur cod mem (inc cont-prg) (push pila-dat (second fetched)) pila-llam)
+          PFM (recur cod mem (inc cont-prg) (push pila-dat (mem (second fetched))) pila-llam)
+
+          ADD (recur cod mem (inc cont-prg) (aplicar-aritmetico + pila-dat) pila-llam)
+          SUB (recur cod mem (inc cont-prg) (aplicar-aritmetico - pila-dat) pila-llam)
+          MUL (recur cod mem (inc cont-prg) (aplicar-aritmetico * pila-dat) pila-llam)
+          DIV (recur cod mem (inc cont-prg) (aplicar-aritmetico / pila-dat) pila-llam)
+
+          EQ  (recur cod mem (inc cont-prg) (aplicar-relacional =    pila-dat) pila-llam)
+          NEQ (recur cod mem (inc cont-prg) (aplicar-relacional not= pila-dat) pila-llam)
+          GT  (recur cod mem (inc cont-prg) (aplicar-relacional >    pila-dat) pila-llam)
+          GTE (recur cod mem (inc cont-prg) (aplicar-relacional >=   pila-dat) pila-llam)
+          LT  (recur cod mem (inc cont-prg) (aplicar-relacional <    pila-dat) pila-llam)
+          LTE (recur cod mem (inc cont-prg) (aplicar-relacional <=   pila-dat) pila-llam)
+
+          NEG (recur cod mem (inc cont-prg) (push (pop pila-dat) (- (last pila-dat))) pila-llam)
+          ODD (recur cod mem (inc cont-prg) (push (pop pila-dat) ({false 0 true 1} (odd? (last pila-dat)))) pila-llam)
+
+          JMP (recur cod mem (second fetched) pila-dat pila-llam)
+          JC  (recur cod mem (if (zero? (last pila-dat)) (inc cont-prg) (second fetched)) (pop pila-dat) pila-llam)
+          CAL (recur cod mem (second fetched) pila-dat (push pila-llam (inc cont-prg)))
+          RET (recur cod mem (last pila-llam) pila-dat (pop pila-llam))
        )
   )
 )
@@ -791,24 +848,16 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 (defn cargar-var-en-tabla [amb]
   (if (= (estado amb) :sin-errores)
-    (let [a-declarar 
-      (filter 
-        (fn [ident] (not (ya-declarado-localmente? ident (contexto amb)))) 
-        (filter identificador? (rest (simb-ya-parseados amb))))
-      ] (assoc amb 
-        4 (assoc (contexto amb) 1 
-            (into (vector)
-              (concat
-                (second (contexto amb))
-                (map-indexed
-                  (fn [i var] [var 'VAR (+ i (prox-var amb))])
-                  a-declarar
-                )
+    (assoc amb 
+      4 (assoc (contexto amb) 
+          1 (into (vector)
+              (push
+                (second (contexto amb)) 
+                [(last (simb-ya-parseados amb)) 'VAR (prox-var amb)]
               )
-            )
           )
-        5 (+ (prox-var amb) (count a-declarar))
-      )
+        )
+      5 (inc (prox-var amb))
     )
     amb)
 )
@@ -1098,7 +1147,7 @@
 (defn generar-operador-relacional [amb operador]
   (if (= (estado amb) :sin-errores)
     (assoc amb
-      6 (concat (bytecode amb) 
+      6 (into (vector) (concat (bytecode amb) 
           (case operador
             > ['GT]
             < ['LT]
@@ -1108,7 +1157,7 @@
             <> ['NEQ]
             []
           )
-      )
+        ))
     )
     amb)
 )

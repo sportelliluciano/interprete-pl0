@@ -131,12 +131,6 @@
       '[nil () [VAR X Y] :sin-errores [[0] [[X VAR 0] [Y VAR 1]]] 2 [[JMP ?]]]
     ))
   )
-  (testing "Tokens no identificadores"
-    (is (=
-      (cargar-var-en-tabla '[nil () [VAR X , Y \;] :sin-errores [[0] [[X VAR 0]]] 1 [[JMP ?]]])
-      '[nil () [VAR X Y \;] :sin-errores [[0] [[X VAR 0] [Y VAR 1]]] 2 [[JMP ?]]]
-    ))
-  )
 )
 
 (deftest inicializar-contexto-local-test
@@ -349,6 +343,18 @@
     (is (=
       (generar-operador-relacional ['WRITELN (list 'END (symbol ".")) [] :sin-errores [[0 3] []] 6 '[[JMP ?] [JMP ?] [CAL 1] RET]] '>=)
       '[WRITELN (END .) [] :sin-errores [[0 3] []] 6 [[JMP ?] [JMP ?] [CAL 1] RET GTE]]
+    ))
+  )
+  (testing "El tipo de secuencia del bytecode actualizado es vector []"
+    (is (vector? 
+          (bytecode
+            (generar-operador-relacional ['WRITELN (list 'END (symbol ".")) [] :sin-errores [[0 3] []] 6 '[[JMP ?] [JMP ?] [CAL 1] RET]] '>=)
+          )
+    ))
+    (is (vector? 
+          (bytecode
+            (generar-operador-relacional ['WRITELN (list 'END (symbol ".")) [] :sin-errores [[0 3] []] 6 '[]] '>=)
+          )
     ))
   )
 )
