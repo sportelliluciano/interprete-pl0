@@ -680,7 +680,16 @@
 ; user=> (a-mayusculas-salvo-strings "  writeln ('Se ingresa un valor, se muestra su doble.');")
 ; "  WRITELN ('Se ingresa un valor, se muestra su doble.');"
  ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-(defn a-mayusculas-salvo-strings [s] 
+(defn a-mayusculas-salvo-strings 
+  ([s] (a-mayusculas-salvo-strings s false))
+  ([s dentro-de-comillas]
+    (cond
+      (= "" s) ""
+      (= \' (first s)) (str \' (a-mayusculas-salvo-strings (subs s 1) (not dentro-de-comillas)))
+      (= true dentro-de-comillas) (str (first s) (a-mayusculas-salvo-strings (subs s 1) dentro-de-comillas))
+      :else (str (clojure.string/upper-case (first s)) (a-mayusculas-salvo-strings (subs s 1) dentro-de-comillas))
+    )
+  )
 )
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -695,6 +704,23 @@
 ; false
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 (defn palabra-reservada? [x]
+  (case (str x)
+    "CONST" true
+    "VAR" true
+    "PROCEDURE" true
+    "CALL" true
+    "BEGIN" true
+    "END" true
+    "IF" true
+    "THEN" true
+    "WHILE" true
+    "DO" true
+    "ODD" true
+    "READLN" true
+    "WRITELN" true
+    "WRITE" true
+    false
+  )
 )
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -709,6 +735,11 @@
 ; false
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 (defn identificador? [x]
+  (cond
+    (palabra-reservada? x) false
+    (nil? (re-matches #"[a-zA-Z][a-zA-Z0-9]*" (str x))) false
+    :else true
+  )
 )
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -723,6 +754,7 @@
 ; false
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 (defn cadena? [x]
+  (not (nil? (re-matches #"'(.*)'" (str x))))
 )
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -741,6 +773,9 @@
 ; true
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 (defn ya-declarado-localmente? [ident context]
+  (let [inicio-scope (last (first context)), scope (nthrest (second context) inicio-scope)]
+    (boolean (some true? (map (fn [value] (= ident (first value))) scope)))
+  )
 )
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -755,6 +790,27 @@
 ; [nil () [VAR X Y] :sin-errores [[0] [[X VAR 0] [Y VAR 1]]] 2 [[JMP ?]]]
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 (defn cargar-var-en-tabla [amb]
+  (if (= (estado amb) :sin-errores)
+    (let [a-declarar 
+      (filter 
+        (fn [ident] (not (ya-declarado-localmente? ident (contexto amb)))) 
+        (filter identificador? (rest (simb-ya-parseados amb))))
+      ] (assoc amb 
+        4 (assoc (contexto amb) 1 
+            (into (vector)
+              (concat
+                (second (contexto amb))
+                (map-indexed
+                  (fn [i var] [var 'VAR (+ i (prox-var amb))])
+                  a-declarar
+                )
+              )
+            )
+          )
+        5 (+ (prox-var amb) (count a-declarar))
+      )
+    )
+    amb)
 )
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -767,6 +823,15 @@
 ; [nil () [] :sin-errores [[0 3] [[X VAR 0] [Y VAR 1] [INI PROCEDURE 1]]] 2 [[JMP ?]]]
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 (defn inicializar-contexto-local [amb]
+  (if (= (estado amb) :sin-errores)
+    (let [ctx (contexto amb), inicio-scopes (first ctx), datos-scopes (second ctx)]
+      (assoc amb 
+        4 (assoc ctx 
+            0 (conj inicio-scopes (count datos-scopes))
+          )
+      )
+    )
+    amb)
 )
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -780,6 +845,15 @@
 ; [BEGIN (X := 7 ; Y := 12 ; END .) [VAR X , Y ;] :sin-errores [[0] [[X VAR 0] [Y VAR 1]]] 2 [[JMP ?]]]
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 (defn declaracion-var [amb]
+  (if (and (= (estado amb) :sin-errores) (= (simb-actual amb) 'VAR))
+    (-> amb
+        (escanear)
+        (procesar-terminal ,,, identificador? 5)
+        (controlar-duplicado)
+        (cargar-var-en-tabla)
+        (declarar-mas-idents)
+        (procesar-terminal ,,, (symbol ";") 3))
+    amb)
 )
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -796,6 +870,13 @@
 ; [7 (; Y := - 12 ; END .) [VAR X , Y ; BEGIN X := -] :sin-errores [[0] [[X VAR 0] [Y VAR 1]]] 2 []]
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 (defn procesar-signo-unario [amb]
+  (if (= (estado amb) :sin-errores)
+    (case (simb-actual amb) 
+      + (escanear amb)
+      - (escanear amb)
+      amb
+    )
+    amb)
 )
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -808,6 +889,9 @@
 ; [END (.) [VAR X ; BEGIN X := X * 2] :sin-errores [[0] [[X VAR 0]]] 1 [[PFM 0] [PFI 2] MUL]]
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 (defn termino [amb]
+  (if (= (estado amb) :sin-errores)
+    (procesar-mas-factores (factor amb))
+    amb)
 )
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -822,6 +906,24 @@
 ; [END (.) [VAR X ; BEGIN X := - ( X * 2 + 1 )] :sin-errores [[0] [[X VAR 0]]] 1 [[PFM 0] [PFI 2] MUL [PFI 1] ADD NEG]]
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 (defn expresion [amb]
+  (if (= (estado amb) :sin-errores)
+    (case (simb-actual amb)
+      + ( -> amb
+          (escanear)
+          (termino)
+          (generar-signo ,,, '+)
+        )
+      - ( -> amb
+          (escanear)
+          (termino)
+          (generar-signo ,,, '-)
+        )
+      ( -> amb
+        (termino)
+        (procesar-mas-terminos)
+      )
+    )
+    amb)
 )
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -850,6 +952,11 @@
 ; [a b c]
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 (defn aplicar-aritmetico [op pila]
+  (let [rhs (last pila), lhs (last (butlast pila)), real_op ({+ + - - * * / quot} op)]
+    (if (and (number? lhs) (number? rhs) (not (nil? real_op)))
+      (into (vector) (concat (drop-last 2 pila) [(real_op lhs rhs)]))
+      pila)
+  )
 )
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -873,6 +980,11 @@
 ; [a b c]
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 (defn aplicar-relacional [op pila]
+  (let [rhs (last pila), lhs (last (butlast pila))]
+    (if (and (number? lhs) (number? rhs))
+      (into (vector) (concat (drop-last 2 pila) [({false 0 true 1} (op lhs rhs))]))
+      pila)
+  )
 )
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -892,7 +1004,17 @@
 ; 0 nil
 ; nil
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-(defn dump [cod]
+(defn dump 
+  ([cod] (dump cod 0))
+  ([cod i] 
+    (if (< i (count cod)) 
+      (let [] 
+        (println i (cod i))
+        (recur cod (+ i 1))
+      )
+      nil
+    )
+  )
 )
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -911,8 +1033,18 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 (defn generar 
   ([amb instr]
+    (if (= (estado amb) :sin-errores)
+      (assoc amb
+        6 (conj (bytecode amb) instr)
+      )
+      amb)
   )
   ([amb instr val]
+    (if (= (estado amb) :sin-errores)
+      (assoc amb
+        6 (conj (bytecode amb) [instr val])
+      )
+      amb)
   )
 )
 
@@ -924,6 +1056,9 @@
 ; ([X VAR 0] [X VAR 2])
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 (defn buscar-coincidencias [amb]
+  (let [scope (second (contexto amb))]
+    (filter (fn [item] (= (last (simb-ya-parseados amb)) (first item))) scope)
+  )
 )
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -938,6 +1073,13 @@
 ; [WRITELN (END .) [] :sin-errores [[0 3] []] 6 [[JMP 8] [JMP 4] [CAL 1] RET [PFM 2] OUT NL RET]]
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 (defn fixup [amb ubi]
+  (if (= (estado amb) :sin-errores)
+    (assoc amb
+      6 (assoc (bytecode amb) 
+          ubi ['JMP (count (bytecode amb))]
+        )
+    )
+    amb)
 )
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -954,6 +1096,21 @@
 ; [WRITELN (END .) [] :sin-errores [[0 3] []] 6 [[JMP ?] [JMP ?] [CAL 1] RET GTE]]
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 (defn generar-operador-relacional [amb operador]
+  (if (= (estado amb) :sin-errores)
+    (assoc amb
+      6 (concat (bytecode amb) 
+          (case operador
+            > ['GT]
+            < ['LT]
+            >= ['GTE]
+            <= ['LTE]
+            = ['EQ]
+            <> ['NEQ]
+            []
+          )
+      )
+    )
+    amb)
 )
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -972,6 +1129,12 @@
 ; [nil () [] :sin-errores [[0] [[X VAR 0]]] 1 [MUL ADD NEG]]
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 (defn generar-signo [amb signo]
+  (if (= (estado amb) :sin-errores)
+    (case signo
+      - (assoc amb 6 (conj (bytecode amb) 'NEG))
+      amb
+    )
+    amb)
 )
 
 (defn -main
