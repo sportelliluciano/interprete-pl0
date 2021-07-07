@@ -86,21 +86,21 @@
       (driver-loop :iniciado))
    ([status]
       (print "PL/0> ") (flush)
-      (try (let [linea (clojure.string/split (clojure.string/upper-case (read-line)) #" "), cabeza (first linea)]
+      (try (let [linea (clojure.string/split (clojure.string/upper-case (read-line)) #" "), cabeza (first linea), args (if (nil? (second linea)) "" (second linea))]
                 (cond (= cabeza "SALIR") 'CHAU
                       (= cabeza "AYUDA") (driver-loop)
-                      (= cabeza "ESCAN") (let [nom (second linea)]
+                      (= cabeza "ESCAN") (let [nom args]
                                               (if (not (.exists (clojure.java.io/file nom)))
                                                   (do (print "ERROR: ") (println (buscar-mensaje 22)) (flush) (driver-loop status))
                                                   (do (listar (escanear-arch nom)) (driver-loop status))))
-                      (= cabeza "VIRTU") (let [nom (second linea)]
+                      (= cabeza "VIRTU") (let [nom args]
                                               (if (not (.exists (clojure.java.io/file nom)))
                                                   (do (print "ERROR: ") (println (buscar-mensaje 22)) (flush) (driver-loop status))
                                                   (let [res (parsear (escanear-arch nom))]
                                                        (do (if (= (estado res) :sin-errores)
                                                                (dump (bytecode res)))
                                                            (driver-loop status)))))
-                      (= cabeza "INTER") (let [nom (second linea)]
+                      (= cabeza "INTER") (let [nom args]
                                               (if (not (.exists (clojure.java.io/file nom)))
                                                   (do (print "ERROR: ") (println (buscar-mensaje 22)) (flush) (driver-loop status))
                                                   (let [res (parsear (escanear-arch nom))]
