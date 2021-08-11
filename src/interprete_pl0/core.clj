@@ -64,6 +64,7 @@
 (declare aplicar-aritmetico)
 (declare aplicar-relacional)
 (declare dump)
+(declare aplicar-pot)
 
 ; (defn spy
 ;   ([x] (do (prn x) x))
@@ -116,7 +117,7 @@
 (defn escanear-arch [nom]
       (map #(let [aux (try (clojure.edn/read-string %) (catch Exception e (symbol %)))] (if (or (number? aux) (string? aux)) aux (symbol %)))
             (remove empty? (with-open [rdr (clojure.java.io/reader nom)]
-                                      (flatten (doall (map #(re-seq #"CONST|VAR|PROCEDURE|CALL|BEGIN|END|IF|THEN|WHILE|DO|ODD|READLN|WRITELN|WRITE|\<\=|\>\=|\<\>|\<|\>|\=|\:\=|\(|\)|\.|\,|\;|\+|\-|\*|\/|\'[^\']*\'|\d+|[A-Z][A-Z0-9]*|\!|\"|\#|\$|\%|\&|\'|\@|\?|\^|\:|\[|\\|\]|\_|\{|\||\}|\~" (a-mayusculas-salvo-strings %)) (line-seq rdr)))))))
+                                      (flatten (doall (map #(re-seq #"CONST|VAR|PROCEDURE|CALL|BEGIN|END|IF|THEN|WHILE|DO|ODD|READLN|WRITELN|WRITE|POW|\<\=|\>\=|\<\>|\<|\>|\=|\:\=|\(|\)|\.|\,|\;|\+|\-|\*|\/|\'[^\']*\'|\d+|[A-Z][A-Z0-9]*|\!|\"|\#|\$|\%|\&|\'|\@|\?|\^|\:|\[|\\|\]|\_|\{|\||\}|\~" (a-mayusculas-salvo-strings %)) (line-seq rdr)))))))
 )
 
 (defn listar
@@ -175,6 +176,7 @@
    21 "ENTRADA INVALIDA. INTENTE DE NUEVO!"
    22 "ARCHIVO NO ENCONTRADO"
    23 "COMANDO DESCONOCIDO"
+   24 "SE ESPERABA UNA COMA:  ,"
    cod)
 )
 
@@ -706,6 +708,7 @@
           SUB (recur cod mem (inc cont-prg) (aplicar-aritmetico - pila-dat) pila-llam)
           MUL (recur cod mem (inc cont-prg) (aplicar-aritmetico * pila-dat) pila-llam)
           DIV (recur cod mem (inc cont-prg) (aplicar-aritmetico / pila-dat) pila-llam)
+          POW (recur cod mem (inc cont-prg) (aplicar-pot pila-dat) pila-llam)
 
           EQ  (recur cod mem (inc cont-prg) (aplicar-relacional =    pila-dat) pila-llam)
           NEQ (recur cod mem (inc cont-prg) (aplicar-relacional not= pila-dat) pila-llam)
@@ -722,6 +725,15 @@
           CAL (recur cod mem (second fetched) pila-dat (push pila-llam (inc cont-prg)))
           RET (recur cod mem (last pila-llam) pila-dat (pop pila-llam))
        )
+  )
+)
+
+
+(defn aplicar-pot [pila]
+  (let [expo (last pila), base (last (butlast pila))]
+    (if (and (number? expo) (number? expo))
+      (into (vector) (concat (drop-last 2 pila) [(reduce * (repeat expo base))]))
+      pila)
   )
 )
 
@@ -776,6 +788,7 @@
     "READLN" true
     "WRITELN" true
     "WRITE" true
+    "POW" true
     false
   )
 )
@@ -966,6 +979,15 @@
           (escanear)
           (termino)
           (generar-signo ,,, '-)
+        )
+      POW ( -> amb
+            (escanear)
+            (procesar-terminal ,,, (symbol "(") 12)
+            (expresion)
+            (procesar-terminal ,,, (symbol ",") 24)
+            (expresion)
+            (procesar-terminal ,,, (symbol ")") 13)
+            (generar ,,, 'POW)
         )
       ( -> amb
         (termino)
