@@ -37,6 +37,7 @@
 (declare condicion)
 (declare procesar-signo-unario)
 (declare expresion)
+(declare ternario)
 (declare procesar-mas-terminos)
 (declare termino)
 (declare procesar-mas-factores)
@@ -116,7 +117,7 @@
 (defn escanear-arch [nom]
       (map #(let [aux (try (clojure.edn/read-string %) (catch Exception e (symbol %)))] (if (or (number? aux) (string? aux)) aux (symbol %)))
             (remove empty? (with-open [rdr (clojure.java.io/reader nom)]
-                                      (flatten (doall (map #(re-seq #"CONST|VAR|PROCEDURE|CALL|BEGIN|END|IF|THEN|WHILE|DO|ODD|READLN|WRITELN|WRITE|\<\=|\>\=|\<\>|\<|\>|\=|\:\=|\(|\)|\.|\,|\;|\+|\-|\*|\/|\'[^\']*\'|\d+|[A-Z][A-Z0-9]*|\!|\"|\#|\$|\%|\&|\'|\@|\?|\^|\:|\[|\\|\]|\_|\{|\||\}|\~" (a-mayusculas-salvo-strings %)) (line-seq rdr)))))))
+                                      (flatten (doall (map #(re-seq #"CONST|VAR|PROCEDURE|CALL|BEGIN|END|IF|THEN|WHILE|DO|ODD|READLN|WRITELN|WRITE|\<\=|\>\=|\<\>|\<|\>|\=|\:\=|\(|\)|\.|\,|\;|\+|\-|\*|\/|\'[^\']*\'|\d+|[A-Z][A-Z0-9]*|\!|\"|\#|\$|\%|\&|\'|\@|\?|\^|\:|\[|\\|\]|\_|\{|\||\}|\~|\¿|\?" (a-mayusculas-salvo-strings %)) (line-seq rdr)))))))
 )
 
 (defn listar
@@ -175,6 +176,8 @@
    21 "ENTRADA INVALIDA. INTENTE DE NUEVO!"
    22 "ARCHIVO NO ENCONTRADO"
    23 "COMANDO DESCONOCIDO"
+   24 "SE ESPERABA DOS PUNTOS:  :"
+   25 "SE ESPERABA UN SIGNO DE PREGUNTA:  ?"
    cod)
 )
 
@@ -719,6 +722,7 @@
 
           JMP (recur cod mem (second fetched) pila-dat pila-llam)
           JC  (recur cod mem (if (zero? (last pila-dat)) (inc cont-prg) (second fetched)) (pop pila-dat) pila-llam)
+          JN  (recur cod mem (if (not (zero? (last pila-dat))) (inc cont-prg) (second fetched)) (pop pila-dat) pila-llam)
           CAL (recur cod mem (second fetched) pila-dat (push pila-llam (inc cont-prg)))
           RET (recur cod mem (last pila-llam) pila-dat (pop pila-llam))
        )
@@ -967,12 +971,42 @@
           (termino)
           (generar-signo ,,, '-)
         )
+      ¿ ( -> amb
+          (escanear)
+          (ternario)
+      )
       ( -> amb
         (termino)
         (procesar-mas-terminos)
       )
     )
     amb)
+)
+
+(defn ternario [amb]
+  (if (= (estado amb) :sin-errores)
+    (let [primera-fase 
+      (-> amb
+        (condicion)
+        (generar ,,, 'JN '?))]
+        (let [segunda-fase 
+                (-> primera-fase
+                  (procesar-terminal ,,, (symbol "?") 25)
+                  (expresion)
+                  (procesar-terminal ,,, (symbol ":") 24)
+                  (generar ,,, 'JMP '?))]
+                    (if (= (estado segunda-fase) :sin-errores)
+                        (-> segunda-fase
+                            (fixup ,,, (dec (count (bytecode primera-fase))))
+                            (expresion)
+                            (fixup ,,, (dec (count (bytecode segunda-fase))))
+                        )
+                        segunda-fase
+                    )
+        )
+      )
+    amb
+  )
 )
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -1125,7 +1159,7 @@
   (if (= (estado amb) :sin-errores)
     (assoc amb
       6 (assoc (bytecode amb) 
-          ubi ['JMP (count (bytecode amb))]
+          ubi [(first (nth (bytecode amb) ubi)) (count (bytecode amb))]
         )
     )
     amb)
